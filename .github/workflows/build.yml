@@ -208,11 +208,13 @@ jobs:
           echo "PYTHONPATH=$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - name: Build the pinned pahole
+        env:
+          PAHOLE_BUILD_DIR: ${{ runner.temp }}/pahole-build
         run: |
           set -euo pipefail
-          bash scripts/install-pahole.sh
-          echo "$PWD/work/_tools/pahole/bin" >> "$GITHUB_PATH"
-
+          PAHOLE_PREFIX="$RUNNER_TEMP/pahole"
+          bash scripts/install-pahole.sh "$PAHOLE_PREFIX"
+          echo "$PAHOLE_PREFIX/bin" >> "$GITHUB_PATH"
       - name: Verify toolchain
         run: clang --version && clang -print-prog-name=ld.lld && pahole --version
 
