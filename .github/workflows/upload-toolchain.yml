@@ -1,51 +1,74 @@
 name: Upload AOSP Clang Toolchain
 
 on:
-  workflow_dispatch:      # One-time: download AOSP clang, package, upload to Release
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   upload:
     runs-on: ubuntu-24.04
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Download AOSP clang r563880c
-        run: |
-          # sparse-clone prebuilts repo and checkout the r563880c commit (f8439f06)
-          git clone --depth 1 --filter=blob:none --sparse https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 clang-prebuilts
-          cd clang-prebuilts
-          git fetch --depth 1 origin f8439f0628d799092dd07df440a6334cab28939c
-          git checkout FETCH_HEAD
-          git sparse-checkout set clang-r563880c
-          cd ..
-          # package the toolchain
-          mkdir -p work/_tmp
-          tar czf work/_tmp/clang-r563880c.tar.gz -C clang-prebuilts/clang-r563880c .
-          ls -lh work/_tmp/clang-r563880c.tar.gz
-
-      - name: Create Release
+      - name: Download and verify AOSP Clang r563880c
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cat <<'MD' > notes.md
+          set -euo pipefail
+
+          mkdir -p work/_tmp
+
+          TOOLCHAIN_ARCHIVE="work/_tmp/clang-r563880c.tar.gz"
+          TOOLCHAIN_URL="https://github.com/GuLingguang/oneplus-sm8750-kernel-pro-build/releases/download/toolchain-AOSP-Clang-21.0.0-r563880c/clang-r563880c.tar.gz"
+          EXPECTED_SHA256="ee099045b1323087e0c1d3962d1d8c582fcdef45986976b82886a6177f142763"
+
+          curl -fL --retry 3 \
+            "$TOOLCHAIN_URL" \
+            -o "$TOOLCHAIN_ARCHIVE"
+
+          echo "$EXPECTED_SHA256  $TOOLCHAIN_ARCHIVE" | sha256sum --check
+
+          echo "Toolchain archive verified:"
+          ls -lh "$TOOLCHAIN_ARCHIVE"
+
+      - name: Create or update Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="toolchain-AOSP-Clang-21.0.0-r563880c"
+          ARCHIVE="work/_tmp/clang-r563880c.tar.gz"
+
+          cat > notes.md <<'MD'
           # AOSP Clang 21.0.0 (r563880c)
 
-          🏷️ **Category**: \`toolchain\` \| \`clang\` \| r563880c
-
-
           Official Android prebuilt toolchain (clang/llvm/lld 21.0.0).
-          Matches the exact toolchain used to build the OnePlus Ace 6 official kernel (IKCONFIG: r563880c).
+
+          Source:
+          https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+
+          The archive is downloaded from the upstream project release and
+          verified against the SHA-256 pinned by this repository.
 
           ## Asset
 
-          | File | Description |
-          |---|---|
-          | clang-r563880c.tar.gz | Full Linux x86_64 toolchain (extract & use) |
-
-          ## Usage
-
-          Workflow downloads this asset, extracts it, and adds `bin/` to PATH before building.
+          - `clang-r563880c.tar.gz`: Linux x86_64 AOSP Clang toolchain
           MD
-          gh release create "toolchain-AOSP-Clang-21.0.0-r563880c" \
-            --notes-file notes.md \
-            work/_tmp/clang-r563880c.tar.gz
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ARCHIVE" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --notes-file notes.md
+          else
+            gh release create "$TAG" "$ARCHIVE" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "AOSP Clang 21.0.0 r563880c" \
+              --notes-file notes.md
+          fi
